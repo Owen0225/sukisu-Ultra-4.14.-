@@ -179,7 +179,7 @@ setup_mkbootimg() {
 # such as &spmi_bus when compiling a standalone DT overlay.
 setup_floral_dtc() {
 	[ "${KERNEL_CONFIG:-}" = "floral_defconfig" ] || return 0
-	group "Downloading Pixel 4 DTC"
+	group "Downloading Pixel 4 device-tree tools"
 	local dir="${WORKSPACE}/floral-tools"
 	local encoded="${dir}/dtc.b64"
 	mkdir -p "$dir"
@@ -187,8 +187,18 @@ setup_floral_dtc() {
 	base64 --decode "$encoded" >"${dir}/dtc"
 	chmod +x "${dir}/dtc"
 	"${dir}/dtc" --version
+
+	# The floral default build also produces dtbo.img even when the action only
+	# packages the kernel Image.  Its Makefile invokes mkdtimg by name, so put
+	# the matching AOSP prebuilt on PATH as well as supplying DTC_EXT.
+	encoded="${dir}/mkdtimg.b64"
+	fetch "https://android.googlesource.com/platform/prebuilts/misc/+/refs/heads/android-msm-coral-4.14-android13/linux-x86/libufdt/mkdtimg?format=TEXT" "$encoded"
+	base64 --decode "$encoded" >"${dir}/mkdtimg"
+	chmod +x "${dir}/mkdtimg"
+	[ -x "${dir}/mkdtimg" ] || die "downloaded mkdtimg is not executable"
+	export_env CLANG_PATH "${CLANG_PATH:-${CLANG_DIR}/bin}:${dir}"
 	export_env CUSTOM_CMDS "${CUSTOM_CMDS:-} DTC_EXT=${dir}/dtc"
-	ok "Pixel 4 downstream DTC ready"
+	ok "Pixel 4 downstream DTC and mkdtimg ready"
 	endgroup
 }
 
