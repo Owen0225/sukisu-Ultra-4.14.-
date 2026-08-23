@@ -174,8 +174,27 @@ setup_mkbootimg() {
 	endgroup
 }
 
+# Pixel 4's overlay sources rely on the downstream DTC shipped with the
+# matching Google kernel branch. The in-tree/upstream DTC rejects references
+# such as &spmi_bus when compiling a standalone DT overlay.
+setup_floral_dtc() {
+	[ "${KERNEL_CONFIG:-}" = "floral_defconfig" ] || return 0
+	group "Downloading Pixel 4 DTC"
+	local dir="${WORKSPACE}/floral-tools"
+	local encoded="${dir}/dtc.b64"
+	mkdir -p "$dir"
+	fetch "https://android.googlesource.com/platform/prebuilts/misc/+/refs/heads/android-msm-coral-4.14-android13/linux-x86/dtc/dtc?format=TEXT" "$encoded"
+	base64 --decode "$encoded" >"${dir}/dtc"
+	chmod +x "${dir}/dtc"
+	"${dir}/dtc" --version
+	export_env CUSTOM_CMDS "${CUSTOM_CMDS:-} DTC_EXT=${dir}/dtc"
+	ok "Pixel 4 downstream DTC ready"
+	endgroup
+}
+
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 	setup_clang
 	setup_gcc
+	setup_floral_dtc
 	setup_mkbootimg
 fi
