@@ -338,6 +338,59 @@ hooks_patch_apply() {
 	endgroup
 }
 
+# The current SukiSU builtin tree still assumes a few helpers introduced after
+# Linux 4.14. Keep these source-level fixes scoped to the legacy non-GKI build
+# instead of weakening warnings for the whole kernel.
+sukisu_414_compat_apply() {
+	[ "${KSU_VARIANT:-none}" = "sukisu-ultra" ] || return 0
+	local kver ksu_dir
+	kver=$(kernel_version "$KERNEL_DIR") || return 0
+	[ "$kver" = "4.14" ] || return 0
+	ksu_dir="${KERNEL_DIR}/${KSU_DIR:-KernelSU}/kernel"
+	[ -d "$ksu_dir" ] || die "SukiSU kernel directory missing: ${ksu_dir}"
+
+	group "Applying SukiSU Linux 4.14 compatibility fixes"
+	python3 - "$ksu_dir" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+
+allowlist = root / "policy" / "allowlist.c"
+text = allowlist.read_text()
+text = text.replace("        fallthrough;", "        /* fall through */")
+allowlist.write_text(text)
+
+ksud = root / "runtime" / "ksud.c"
+lines = ksud.read_text().splitlines()
+fixed = []
+calls = {
+    "ksu_selinux_hide_handle_post_fs_data();",
+    "ksu_selinux_hide_handle_second_stage();",
+}
+for line in lines:
+    if line.strip() in calls:
+        fixed.extend([
+            "#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)",
+            line,
+            "#endif",
+        ])
+    else:
+        fixed.append(line)
+ksud.write_text("\n".join(fixed) + "\n")
+
+event = root / "sulog" / "event.c"
+text = event.read_text()
+text = text.replace(
+    "#define USER_ARG_NULL user_arg_null_ptr()",
+    "#define USER_ARG_NULL (*user_arg_null_ptr())",
+)
+event.write_text(text)
+PY
+	ok "SukiSU Linux 4.14 compatibility fixes applied"
+	endgroup
+}
+
 # ======================================================================== KPM
 
 # SukiSU-Ultra's Kernel Patch Module support needs a post-link step: the
@@ -384,6 +437,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 			   [ "${KSU_HOOK_MODE_RESOLVED:-}" = "manual" ]; then
 				hooks_patch_apply
 			fi
+			sukisu_414_compat_apply
 
 			if is_true "${ENABLE_SUSFS:-false}";      then susfs_apply;      fi
 			if is_true "${ENABLE_HIDE_STUFF:-false}"; then hide_stuff_apply; fi
