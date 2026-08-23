@@ -37,6 +37,7 @@ make_anykernel3() {
 		# This repository builds only for Pixel 4 (flame). Refuse every other
 		# device instead of producing a dangerously broad flashable package.
 		sed -i \
+			-e 's/^kernel.string=.*/kernel.string=SukiSU Ultra kernel for Pixel 4 (flame)/' \
 			-e 's/^device.name1=.*/device.name1=flame/' \
 			-e 's/^device.name[2-9]=.*/&/' \
 			"${AK3}/anykernel.sh"
@@ -45,6 +46,10 @@ make_anykernel3() {
 		done
 		sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' "${AK3}/anykernel.sh"
 		sed -i 's/IS_SLOT_DEVICE=0;/IS_SLOT_DEVICE=1;/g' "${AK3}/anykernel.sh"
+		# Upstream's template contains example Nexus-era init.rc/fstab edits.
+		# A kernel-only Pixel package must only replace the kernel and preserve
+		# the stock ramdisk, so remove that sample block and retain write_boot.
+		sed -i '/^# init\.rc$/,/^write_boot;/ { /^write_boot;/!d; }' "${AK3}/anykernel.sh"
 	fi
 
 	cp "${BOOT_OUT}/${KERNEL_IMAGE_NAME}" "${AK3}/" \
