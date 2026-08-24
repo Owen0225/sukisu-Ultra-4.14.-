@@ -350,11 +350,12 @@ sukisu_414_compat_apply() {
 	[ -d "$ksu_dir" ] || die "SukiSU kernel directory missing: ${ksu_dir}"
 
 	group "Applying SukiSU Linux 4.14 compatibility fixes"
-	python3 - "$ksu_dir" <<'PY'
+	python3 - "$ksu_dir" "$KERNEL_DIR" <<'PY'
 from pathlib import Path
 import sys
 
 root = Path(sys.argv[1])
+kernel_root = Path(sys.argv[2])
 
 allowlist = root / "policy" / "allowlist.c"
 text = allowlist.read_text()
@@ -386,6 +387,46 @@ text = text.replace(
     "#define USER_ARG_NULL (*user_arg_null_ptr())",
 )
 event.write_text(text)
+
+# The builtin branch installs the manager's driver fd with O_CLOEXEC.  Every
+# ksud child therefore requests a fresh fd through the reboot syscall before
+# issuing ioctls.  The generic 4.14 manual-hook patch predates that UAPI and
+# does not wire ksu_handle_sys_reboot(), leaving ksud with fd=-1 (EBADF).
+#
+# Do not guard this with CONFIG_KSU_MANUAL_HOOK: the builtin branch does not
+# declare that Kconfig symbol.  This compatibility function only runs for the
+# explicitly selected SukiSU 4.14 non-GKI build, where CONFIG_KSU is the
+# correct guard for the source-level manual hook.
+reboot = kernel_root / "kernel" / "reboot.c"
+text = reboot.read_text()
+declaration = """#ifdef CONFIG_KSU
+extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
+                                 void __user **arg);
+#endif
+"""
+if "extern int ksu_handle_sys_reboot" not in text:
+    anchor = "static DEFINE_MUTEX(reboot_mutex);\n"
+    if anchor not in text:
+        raise SystemExit("SukiSU 4.14: reboot mutex anchor not found")
+    text = text.replace(anchor, anchor + "\n" + declaration, 1)
+
+call = "\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);"
+if call not in text:
+    syscall = text.find("SYSCALL_DEFINE4(reboot")
+    if syscall < 0:
+        raise SystemExit("SukiSU 4.14: reboot syscall not found")
+    before, body = text[:syscall], text[syscall:]
+    anchor = "\tint ret = 0;\n"
+    if anchor not in body:
+        raise SystemExit("SukiSU 4.14: reboot syscall body anchor not found")
+    hook = """
+#ifdef CONFIG_KSU
+	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
+#endif
+"""
+    body = body.replace(anchor, anchor + hook, 1)
+    text = before + body
+reboot.write_text(text)
 PY
 	ok "SukiSU Linux 4.14 compatibility fixes applied"
 	endgroup
